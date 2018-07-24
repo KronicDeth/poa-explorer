@@ -365,7 +365,7 @@ defmodule Explorer.Chain do
     with {:ok, changes_list} <- changes_list(addresses_params, for: Address, with: :balance_changeset),
          {:ok, addresses} <-
            insert_addresses(changes_list, timeout: options[:timeout] || @transaction_timeout, timestamps: timestamps()) do
-      broadcast_events([{:balance_updates, addresses}])
+      broadcast_events([{:balance_updates, addresses}], :catchup_index)
       {:ok, addresses}
     end
   end
@@ -820,7 +820,7 @@ defmodule Explorer.Chain do
       * `:timeout` - the timeout for inserting all transactions found in the params lists across all
         types. Defaults to `#{@insert_transactions_timeout}` milliseconds.
   """
-  @spec import_blocks([
+  @spec import_blocks(any, [
           addresses_option
           | blocks_option
           | internal_transactions_option
@@ -843,13 +843,13 @@ defmodule Explorer.Chain do
           | {:error, [Changeset.t()]}
           | {:error, step :: Ecto.Multi.name(), failed_value :: any(),
              changes_so_far :: %{optional(Ecto.Multi.name()) => any()}}
-  def import_blocks(options) when is_list(options) do
+  def import_blocks(indexer, options) when is_list(options) do
     ecto_schema_module_to_params_list = import_options_to_ecto_schema_module_to_params_list(options)
 
     with {:ok, ecto_schema_module_to_changes_list} <-
            ecto_schema_module_to_params_list_to_ecto_schema_module_to_changes_list(ecto_schema_module_to_params_list),
          {:ok, data} <- insert_ecto_schema_module_to_changes_list(ecto_schema_module_to_changes_list, options) do
-      broadcast_events(data)
+      broadcast_events(data, indexer)
       {:ok, data}
     end
   end
@@ -1883,17 +1883,17 @@ defmodule Explorer.Chain do
     Repo.one(query)
   end
 
-  defp broadcast_event_data(event_type, event_data) do
+  defp broadcast_event_data(event_type, event_data, indexer) do
     Registry.dispatch(Registry.ChainEvents, event_type, fn entries ->
       for {pid, _registered_val} <- entries do
-        send(pid, {:chain_event, event_type, event_data})
+        send(pid, {:chain_event, event_type, indexer, event_data})
       end
     end)
   end
 
-  defp broadcast_events(data) do
+  defp broadcast_events(data, indexer) do
     for {event_type, event_data} <- data, event_type in ~w(balance_updates blocks logs transactions)a do
-      broadcast_event_data(event_type, event_data)
+      broadcast_event_data(event_type, event_data, indexer)
     end
   end
 

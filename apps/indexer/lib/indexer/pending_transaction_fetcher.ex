@@ -100,6 +100,7 @@ defmodule Indexer.PendingTransactionFetcher do
         # blockless.
         {:ok, _} =
           Chain.import_blocks(
+            :catchup_index,
             addresses: [params: addresses_params],
             transactions: [on_conflict: :nothing, params: transactions_params]
           )
